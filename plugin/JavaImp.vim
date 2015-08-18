@@ -3,9 +3,8 @@
 " -------------------------------------------------------------------
 
 command! -nargs=? JIX              call s:JavaImpQuickFix()
-command! -nargs=? JI               call s:JavaImpInsert(1)
-command! -nargs=? JavaImp          call s:JavaImpInsert(1)
-command! -nargs=? JavaImpSilent    call s:JavaImpInsert(0)
+command! -nargs=? JI               call s:JavaImpInsert()
+command! -nargs=? JavaImp          call s:JavaImpInsert()
 
 command! -nargs=? JIG              call s:JavaImpGenerate()
 command! -nargs=? JavaImpGenerate  call s:JavaImpGenerate()
@@ -16,11 +15,11 @@ command! -nargs=? JavaImpSort      call s:JavaImpSort()
 command! -nargs=? JID              call s:JavaImpDoc()
 command! -nargs=? JavaImpDoc       call s:JavaImpDoc()
 
-command! -nargs=? JIF              call s:JavaImpFile(0)
-command! -nargs=? JavaImpFile      call s:JavaImpFile(0)
+command! -nargs=? JIF              call s:JavaImpFile()
+command! -nargs=? JavaImpFile      call s:JavaImpFile()
 
-command! -nargs=? JIFS             call s:JavaImpFile(1)
-command! -nargs=? JavaImpFileSplit call s:JavaImpFile(1)
+command! -nargs=? JIFS             call s:JavaImpFile()
+command! -nargs=? JavaImpFileSplit call s:JavaImpFile()
 
 " -------------------------------------------------------------------
 " Default configuration
@@ -62,6 +61,9 @@ if !exists('g:JavaImpStaticImportsFirst')
     let g:JavaImpStaticImportsFirst = 1
 endif
 
+if !exists('g:JavaImpVerbose')
+    let g:JavaImpVerbose = 0
+endif
 
 " Deprecated
 if !exists('g:JavaImpJarCache')
@@ -280,11 +282,11 @@ endfunction
 " (silence is interesting if you're scripting the use of JavaImpInsert...
 "  for example, i have a script that runs JavaImpInsert on all the
 "  class not found errors)
-function! s:JavaImpInsert(verboseMode)
+function! s:JavaImpInsert()
     if (s:JavaImpChkEnv() != 0)
         return
     endif
-    if a:verboseMode
+    if g:JavaImpVerbose
         let verbosity = '' 
     else
         let verbosity = 'silent'
@@ -307,7 +309,7 @@ function! s:JavaImpInsert(verboseMode)
     else
         let fullClassName = s:JavaImpFindFullName(className)
         if (fullClassName ==# '')
-            if ! a:verboseMode
+            if ! g:JavaImpVerbose
                 echo className.' not found (you should update the class map file)'
             else
                 echo 'Can not find any class that matches ' . className . '.'
@@ -319,37 +321,30 @@ function! s:JavaImpInsert(verboseMode)
             endif
         else
             let importLine = 'import ' . fullClassName . ';'
-            " Split before we jump
-            split
+            let importLoc = s:JavaImpGotoLast()
 
-            let hasImport = s:JavaImpGotoLast()
-            let importLoc = line('.')
-
-            let hasPackage = s:JavaImpGotoPackage()
-            if (hasPackage == 1)
-                let pkgLoc = line('.')
+            let pkgLoc = s:JavaImpGotoPackage()
+            if (pkgLoc > -1)
                 let pkgPat = '^\s*package\s\+\(\%(\w\+\.\)*\w\+\)\s*;.*$'
                 let pkg = substitute(getline(pkgLoc), pkgPat, '\1', '')
 
                 " Check to see if the class is in this package, we won't
                 " need an import.
+
                 if (fullClassName == (pkg . '.' . className))
-                    let importLoc = -1
+                    let importLoc = -2
                 else
-                    if (hasImport == 0)
-                        " Add an extra blank line after the package before
-                        " the import
-                        exec verbosity 'call append(pkgLoc, "")'
+                    if (importLoc == -1)
+                        let pkgLoc += 1
                         let importLoc = pkgLoc + 1
                     endif
                 endif
-            elseif (hasImport == 0)
-                let importLoc = 0
             endif
 
+            let importLoc = (importLoc < 0) ? 0 : importLoc
             exec verbosity 'call append(importLoc, importLine)'
 
-            if a:verboseMode
+            if g:JavaImpVerbose
                 if (importLoc >= 0)
                     echo 'Inserted ' . fullClassName . ' for ' . className
                 else
@@ -358,9 +353,7 @@ function! s:JavaImpInsert(verboseMode)
             endif
 
             " go back to the old location
-            close
             call s:JavaImpSort()
-
         endif
     endif
 endfunction
@@ -397,7 +390,6 @@ function! s:JavaImpFindFullName(className)
     endif
     let importLine = ''
     let importCtr = 0
-    let flags = 'w'
     let firstImport = 0
     let firstFullPackage = ''
 
@@ -413,7 +405,6 @@ idx = [i for i, line in enumerate(lines) if re.search('^%s '% className, line)]
 
 vim.command('let importCtr = %d'% len(idx))
 if (len(idx) > 0):
-    vim.command('let flags = "W"')
     for i in range(len(idx)):
         pkg = re.search(r"\S* (.*)$", lines[idx[i]]).group(1)
         pkglist.append(pkg)
@@ -453,17 +444,23 @@ function! s:JavaImpMakeChoice(imctr, className, imports)
     if !filereadable(jicc)
         return ''
     endif
-    silent exe 'split ' . jicc
-    let flags = 'w'
-    let pattern = '^' . a:className . ' '
-    if (search(pattern, flags) > 0)
-        let l = substitute(getline('.'), '^\S* \(.*\)', '\1', '')
-        close
-        return s:JavaImpOrderChoice(a:imctr, l, a:imports)
-    else
-        close
-        return ''
-    endif
+
+python << endpython
+import vim
+import re
+
+jicc = vim.eval('jicc')
+className = vim.eval('a:className')
+
+lines = [line.strip() for line in open(jicc, 'r')]
+idx = [i for i, line in enumerate(lines) if re.search('^%s '% className, line)]
+
+if (len(idx) > 0):
+    pkg = re.search(r"\S* (.*)$", lines[idx[0]]).group(1)
+    vim.command('return s:JavaImpOrderChoice(a:imctr, "%s", a:imports)'% pkg)
+else:
+    vim.command("return ''")
+endpython
 endfunction
 
 " Order the imports with the cacheLine and returns the list.
@@ -516,20 +513,31 @@ function! s:JavaImpSaveChoice(className, imports, selected)
     let im = substitute(im, spat, '', 'g')
 
     let jicc = expand(g:JavaImpDataDir) . s:SL . 'choices.txt'
-    silent exe 'split ' . jicc
-    let flags = 'w'
-    let pattern = '^' . a:className . ' '
-    let l = a:className . ' ' . a:selected . ' ' . im
-    if (search(pattern, flags) > 0)
-        " we found it, replace the line.
-        call setline('.', l)
-    else
-        " we couldn't found it, so we just add the choices
-        call append(0, l)
-    endif
+python << endpython
+import vim
+import re
+import os.path
 
-    silent update
-    close
+jicc = vim.eval('jicc')
+className = vim.eval('a:className')
+selected = vim.eval('a:selected')
+im = vim.eval('im')
+lines = []
+idx = []
+
+if os.path.exists(jicc):
+    lines = [line.strip() for line in open(jicc, 'r')]
+    idx = [i for i, line in enumerate(lines) if re.search('^%s '% className, line)]
+
+if (len(idx) > 0):
+    lines[idx[0]] = ('%s %s %s'% (className, selected, im))
+else:
+    lines.append('%s %s %s'% (className, selected, im))
+
+f = open(jicc, 'w')
+f.write("\n".join(lines))
+f.close()
+endpython
 endfunction
 
 " Choose the import if there's multiple of them.  Returns the selected import
@@ -540,9 +548,9 @@ function! s:JavaImpChooseImport(imctr, className, imports)
     if uncached
         let imps = a:imports
         let simps = a:imports
-        if (a:imctr > 1)
-            let imps = "[No previous choice.  Please pick one from below...]\n".imps
-        endif
+        " if (a:imctr > 1)
+        "     let imps = "[No previous choice.  Please pick one from below...]\n".imps
+        " endif
     else
         let simps = imps
     endif
@@ -596,21 +604,17 @@ function! s:JavaImpChooseImport(imctr, className, imports)
 endfunction
 
 function! s:JavaImpDisplayChoices(imps, className)
-    let imps = a:imps
+    let imps = split(a:imps)
     let simps = imps
-    let ctr = 0
+    let ctr = 1
     let choice = 0
     let cfmstr = ''
     let questStr =  'Multiple matches for ' . a:className . ". Your choice?\n"
-    while (imps !=# '' && imps !~# '^ *\n$')
-        let sepIdx = stridx(imps, "\n")
-        " Gets the substring exluding the newline
-        let imp = strpart(imps, 0, sepIdx)
+    for imp in imps
         let questStr = questStr . '(' . ctr . ') ' . imp . "\n"
         let cfmstr = cfmstr . '&' . ctr . "\n"
         let ctr = ctr + 1
-        let imps = strpart(imps, sepIdx + 1, strlen(imps) - sepIdx - 1)
-    endwhile
+    endfor
 
     if (ctr <= 10)
         " Note that we need to get rid of the ending "\n" for it'll give
@@ -636,18 +640,28 @@ endfunction
 " Sort the import statements in the current file.
 function! s:JavaImpSort()
     split
-    let hasImport = s:JavaImpGotoFirst()
-    if (hasImport == 0)
+
+    if g:JavaImpVerbose
+        let verbosity = '' 
+    else
+        let verbosity = 'silent'
+    end
+
+    let pkgLoc = s:JavaImpGotoPackage()
+    if(pkgLoc >= 0)
+        silent execute pkgLoc . 'delete p'
+    endif
+
+    let firstImp = s:JavaImpGotoFirst()
+    if (firstImp < 0)
         echom 'No import statement found.'
     else
-        let firstImp = line('.')
-        call s:JavaImpGotoLast()
-        let lastImp = line('.')
+        let lastImp = s:JavaImpGotoLast()
         if (g:JavaImpSortRemoveEmpty == 1)
             call s:JavaImpRemoveEmpty(firstImp, lastImp)
             " We need to get the range again
-            call s:JavaImpGotoLast()
-            let lastImp = line('.')
+            let firstImp = s:JavaImpGotoFirst()
+            let lastImp = s:JavaImpGotoLast()
         endif
 
         " Sort the Import Statements using Vim's Builtin 'sort' Function.
@@ -660,26 +674,15 @@ function! s:JavaImpSort()
         " Insert each matching Top Import in Reverse Order.
         for l:pattern in l:reversedTopImports
             " Find the First Import Matching this Pattern.
-            let l:patternFound = s:JavaImpGotoFirstMatchingImport(l:pattern, 'w')
-            if (l:patternFound)
-                let firstImp = line('.')
-
+            let l:firstImp = s:JavaImpGotoFirstMatchingImport(l:pattern, 'w')
+            if (l:firstImp > -1)
                 " Find the Last Matching Import.
-                call s:JavaImpGotoFirstMatchingImport(l:pattern, 'b')
-                let lastImp = line('.')
+                let lastImp = s:JavaImpGotoFirstMatchingImport(l:pattern, 'b')
 
                 " Place this range of lines before that first import.
-                silent execute firstImp . ',' . lastImp . 'delete'
+                silent execute firstImp . ',' . lastImp . 'delete l'
 
-                " Find the Line which should contain the first import and
-                " place it.
-                if (s:JavaImpGotoPackage() == 0)
-                    normal! ggP
-                else
-                    normal! jp
-                endif
-
-                " Place the matching imports there.
+                exec verbosity 'call append(0, split(getreg("l"), "\n"))'
             endif
         endfor
 
@@ -687,31 +690,32 @@ function! s:JavaImpSort()
 
         if (g:JavaImpSortPkgSep > 0)
             " Where are All of the Imports?
-            call s:JavaImpGotoFirst()
-            let l:firstImp = line('.')
-            call s:JavaImpGotoLast()
-            let l:lastImp = line('.')
+            let l:firstImp = s:JavaImpGotoFirst()
+            let l:lastImp = s:JavaImpGotoLast()
 
             " Where are the Static Imports?
-            let l:staticImportsExist = s:JavaImpFindFirstStaticImport()
-            let l:firstStaticImp = line('.')
-            call s:JavaImpFindLastStaticImport()
-            let l:lastStaticImp = line('.')
+            let l:firstStaticImp = s:JavaImpFindFirstStaticImport()
+            let l:lastStaticImp = s:JavaImpFindLastStaticImport()
 
             " Update the Import Range so that the Static Imports are not
             " Included.
-            if (l:staticImportsExist)
-                if (l:firstStaticImp <= l:firstImp)
-                    let l:firstImp = l:lastStaticImp
-                elseif (l:firstStaticImp > l:lastImp)
-                    let l:lastImp = l:firstStaticImp - 1
-                endif
+            if (l:firstStaticImp <= l:firstImp)
+                let l:firstImp = l:lastStaticImp
+            elseif (l:firstStaticImp > l:lastImp)
+                let l:lastImp = l:firstStaticImp - 1
             endif
 
             " Add the Package Separator.
             call s:JavaImpAddPkgSep(l:firstImp, l:lastImp, g:JavaImpSortPkgSep)
         endif
     endif
+
+    if(pkgLoc >= 0)
+        exec verbosity 'call append(0, split(getreg("p"), "\n"))'
+    endif
+
+    let @l = ''
+    let @p = ''
 
     close
 endfunction
@@ -720,10 +724,9 @@ endfunction
 " depending on g:JavaImpStaticImportsFirst.
 function! s:JavaImpPlaceSortedStaticImports()
     " Find the Range of Static Imports
-    if (s:JavaImpFindFirstStaticImport() > 0)
-        let firstStaticImp = line('.')
-        call s:JavaImpFindLastStaticImport()
-        let lastStaticImp = line('.')
+    let firstStaticImp = s:JavaImpFindFirstStaticImport()
+    if (firstStaticImp > -1)
+        let lastStaticImp = s:JavaImpFindLastStaticImport()
 
         " Remove the block of Static Imports.
         execute firstStaticImp . ',' . lastStaticImp . 'delete'
@@ -731,7 +734,7 @@ function! s:JavaImpPlaceSortedStaticImports()
         " Place the cursor before the Normal Imports.
         if g:JavaImpStaticImportsFirst == 1
             " Find the Line which should contain the first import.
-            if (s:JavaImpGotoPackage() == 0)
+            if (s:JavaImpGotoPackage() < 0)
                 normal! ggP
             else
                 normal! jp
@@ -742,8 +745,8 @@ function! s:JavaImpPlaceSortedStaticImports()
         else
             " Paste in the Static Imports after the last import or at the top
             " of the file if no other imports.
-            if (s:JavaImpGotoLast() <= 0)
-                if (s:JavaImpGotoPackage() == 0)
+            if (s:JavaImpGotoLast() < 0)
+                if (s:JavaImpGotoPackage() < 0)
                     normal! ggP
                 else
                     normal! jp
@@ -1020,14 +1023,17 @@ endfunction
 " Go to the package declaration
 function! s:JavaImpGotoPackage()
     " First search for the className in an import statement
-    normal G$
-    let flags = 'w'
-    let pattern = '^\s*package\s\s*.*;'
-    if (search(pattern, flags) == 0)
-        return 0
-    else
-        return 1
-    endif
+python << endpython
+import vim
+import re
+
+lines = vim.current.buffer
+for idx,line in enumerate(lines):
+    if re.match(r"^\s*package\s\s*.*;",line):
+        vim.command('return %d'% idx)
+        break
+endpython
+    return -1
 endfunction
 
 " Go to the last import statement that it can find.  Returns 1 if an import is
@@ -1055,13 +1061,26 @@ function! s:JavaImpFindFirstStaticImport()
 endfunction
 
 function! s:JavaImpGotoFirstMatchingImport(pattern, flags)
-    normal G$
-    let pattern = '^\s*import\s\s*'
-    if (a:pattern !=# '')
-        let pattern = l:pattern . a:pattern
-    endif
-    let pattern = l:pattern . '.*;'
-    return (search(l:pattern, a:flags) > 0)
+python << endpython
+import vim
+import re
+
+lines = vim.current.buffer
+pattern = vim.eval('a:pattern')
+flags = vim.eval('a:flags')
+
+if flags == 'b':
+    r = xrange(len(lines)-1, -1, -1)
+else:
+    r = xrange(0, len(lines), 1)
+
+for i in r:
+    imp = re.match(r"^\s*import\s\s*" + pattern + ".*;",lines[i])
+    if imp:
+        vim.command('return %d'% i)
+        break
+endpython
+    return -1
 endfunction
 
 " -------------------------------------------------------------------
