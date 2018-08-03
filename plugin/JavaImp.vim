@@ -133,7 +133,7 @@ function! s:JavaImpGenerate()
         let pathPrefix = fnamemodify(currPath, headStr)
         let currPkg = strpart(currPath, strlen(pathPrefix) + 1)
 
-        echo 'Searching in path (package): ' . currPath . ' (' . currPkg .  ')'
+        " echo 'Searching in path (package): ' . currPath . ' (' . currPkg .  ')'
         "echo 'currPaths: '.currPaths
         let currPaths = strpart(currPaths, sepIdx + 1, strlen(currPaths) - sepIdx - 1)
         "echo '('.currPaths.')'
@@ -166,7 +166,7 @@ function! s:JavaImpAppendClass(cpath, relativeTo)
         echo ' - null cpath relativeTo '.a:relativeTo
         echo '(beats me... hack the source and figure it out)'
         " Base case... infinite loop protection
-        return 0
+        return []
     elseif (!isdirectory(a:cpath) && match(a:cpath, '\(\.class$\|\.java$\)') > -1)
         " oh good, we see a single entry like org/apache/xerces/bubba.java
         " just slap it on our tmp buffer
@@ -196,7 +196,7 @@ function! s:JavaImpAppendClass(cpath, relativeTo)
         " Check if the jar file exists, if not, we return immediately.
         if (!filereadable(a:cpath))
             echo 'Skipping ' . a:cpath . '. File does not exist.'
-            return 0
+            return []
         endif
         " If we get a jar file, we first tries to match the timestamp of the
         " cache defined in g:JavaImpJarCache directory.  If the jar is newer,
@@ -639,10 +639,10 @@ endfunction
 
 " Sort the import statements in the current file.
 function! s:JavaImpSort()
-    split
+    let l:winview = winsaveview()
 
     if g:JavaImpVerbose
-        let verbosity = '' 
+        let verbosity = ''
     else
         let verbosity = 'silent'
     end
@@ -658,14 +658,14 @@ function! s:JavaImpSort()
     else
         let lastImp = s:JavaImpGotoLast()
         if (g:JavaImpSortRemoveEmpty == 1)
-            call s:JavaImpRemoveEmpty(firstImp, lastImp)
+            call s:JavaImpRemoveEmpty(pkgLoc, lastImp)
             " We need to get the range again
             let firstImp = s:JavaImpGotoFirst()
             let lastImp = s:JavaImpGotoLast()
         endif
 
         " Sort the Import Statements using Vim's Builtin 'sort' Function.
-        execute firstImp . ',' . lastImp . 'sort'
+        exec firstImp . ',' . lastImp . 'sort'
 
         " Reverse the Top Import List so that our insertion loop below works
         " correctly.
@@ -717,7 +717,7 @@ function! s:JavaImpSort()
     let @l = ''
     let @p = ''
 
-    close
+    call winrestview(l:winview)
 endfunction
 
 " Place Sorted Static Imports either before or after the normal imports
@@ -756,6 +756,7 @@ function! s:JavaImpPlaceSortedStaticImports()
             endif
         endif
 
+        exec 'call append(0, "")'
     endif
 endfunction
 
@@ -848,7 +849,7 @@ function! s:JavaImpGetFile(basePath, fullClassName, ext)
 
     " If the file is not readable, return an empty string.
     if filereadable(rtn) == 0
-        let l:rtn = '' 
+        let l:rtn = ''
     endif
     return l:rtn
 endfunction
@@ -1077,7 +1078,7 @@ else:
 for i in r:
     imp = re.match(r"^\s*import\s\s*" + pattern + ".*;",lines[i])
     if imp:
-        vim.command('return %d'% i)
+        vim.command('return %d' % (i + 1))
         break
 endpython
     return -1
