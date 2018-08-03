@@ -665,7 +665,7 @@ function! s:JavaImpSort()
         endif
 
         " Sort the Import Statements using Vim's Builtin 'sort' Function.
-        exec firstImp . ',' . lastImp . 'sort'
+        exec firstImp . ',' . lastImp . '!LC_COLLATE=C sort -d'
 
         " Reverse the Top Import List so that our insertion loop below works
         " correctly.
