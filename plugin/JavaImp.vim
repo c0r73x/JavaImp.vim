@@ -247,13 +247,13 @@ import re
 lines = vim.eval("a:sourceList")
 
 for i in range(len(lines)):
-    subdir = ntpath.dirname(lines[i]);
-    pkg = subdir.replace("/", ".");
+    subdir = ntpath.dirname(lines[i])
+    pkg = subdir.replace("/", ".")
 
-    match = re.search(r'[\\/]([\$0-9A-Za-z_]*)\.(class|java)$', lines[i]);
+    match = re.search(r'[\\/]([\$0-9A-Za-z_]*)\.(class|java)$', lines[i])
     if match:
         name = match.group(1)
-        name = name.replace("$", ".");
+        name = name.replace("$", ".")
         lines[i] = "%s %s.%s" % (name, pkg, name)
     else:
         lines[i] = ""
@@ -320,12 +320,16 @@ function! s:JavaImpInsert()
                 endif
             endif
         else
-            let importLine = 'import ' . fullClassName . ';'
+            if &filetype ==# 'kotlin'
+                let importLine = 'import ' . fullClassName
+            else
+                let importLine = 'import ' . fullClassName . ';'
+            endif
             let importLoc = s:JavaImpGotoLast()
 
             let pkgLoc = s:JavaImpGotoPackage()
             if (pkgLoc > -1)
-                let pkgPat = '^\s*package\s\+\(\%(\w\+\.\)*\w\+\)\s*;.*$'
+                let pkgPat = '^\s*package\s\+\(\%(\w\+\.\)*\w\+\)\s*;\?.*$'
                 let pkg = substitute(getline(pkgLoc), pkgPat, '\1', '')
 
                 " Check to see if the class is in this package, we won't
@@ -369,7 +373,7 @@ import re
 lines = vim.current.buffer
 className = vim.eval('a:className')
 for line in lines:
-    imp = re.match(r"^\s*import\s\s*(.*\." + className + ')\s*;',line)
+    imp = re.match(r"^\s*import\s\s*(.*\." + className + ')\s*;\?',line)
     if imp:
         vim.command('return "%s"'% imp.group(1))
         break;
@@ -1030,7 +1034,7 @@ import re
 
 lines = vim.current.buffer
 for idx,line in enumerate(lines):
-    if re.match(r"^\s*package\s\s*.*;",line):
+    if re.match(r"^\s*package\s\s*.*;?$",line):
         vim.command('return %d'% idx)
         break
 endpython
@@ -1076,7 +1080,7 @@ else:
     r = xrange(0, len(lines), 1)
 
 for i in r:
-    imp = re.match(r"^\s*import\s\s*" + pattern + ".*;",lines[i])
+    imp = re.match(r"^\s*import\s\s*" + pattern + ".*;?$",lines[i])
     if imp:
         vim.command('return %d' % (i + 1))
         break
@@ -1176,11 +1180,11 @@ endfunction
 " If not given an import statement, this returns
 " empty string
 function! s:JavaImpGetClassname(importStr,depth)
-    let pkgMatch = '\s*import\s*.*\.[^.]*;$'
-    let pkgGrep = '\s*import\s*.*\.\([^.]*\);$'
+    let pkgMatch = '\s*import\s*.*\.[^.]*;\?$'
+    let pkgGrep = '\s*import\s*.*\.\([^.]*\);\?$'
 
     if (match(a:importStr, pkgMatch) == -1)
-        let classname = '' 
+        let classname = ''
     else
         let classname = substitute(a:importStr, pkgGrep, '\1', '')
     endif
@@ -1198,7 +1202,7 @@ endfunction
 function! s:JavaImpGetSubPkg(importStr,depth)
     " set up the match/grep command
     let subpkgStr = '[^.]\{-}\.'
-    let pkgMatch = '\s*import\s*.*\.[^.]*;$'
+    let pkgMatch = '\s*import\s*.*\.[^.]*;\?$'
     let pkgGrep = '\s*import\s*\('
     let curDepth = a:depth
     " we tack on a:depth extra subpackage to the end of the match
@@ -1207,7 +1211,7 @@ function! s:JavaImpGetSubPkg(importStr,depth)
       let pkgGrep = pkgGrep.subpkgStr
       let curDepth = curDepth - 1
     endwhile
-    let pkgGrep = pkgGrep.'\)'.'.*;$'
+    let pkgGrep = pkgGrep.'\)'.'.*;\?$'
     " echo pkgGrep
 
     if (match(a:importStr, pkgMatch) == -1)
